@@ -127,7 +127,7 @@ def update_graph(l, a):
 
     fig.update_layout(height=1600, showlegend=False, template="plotly_white")
 
-    return fig, f"Error estimado por Simpson: {E_t:.2e}"
+    return fig, f"Error estimado: {E_t:.2e}"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8050))
