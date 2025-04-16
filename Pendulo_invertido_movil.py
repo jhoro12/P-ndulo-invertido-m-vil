@@ -43,8 +43,8 @@ app.layout = html.Div([
 
     html.Div([
         html.Label("Longitud (l) [m]:"),
-        dcc.Slider(id='l-slider', min=0.1, max=8.0, step=0.1, value=1.0,
-                   marks={i: str(i) for i in range(1, 9)}),
+        dcc.Slider(id='l-slider', min=0.1, max=10.0, step=0.1, value=1.0,
+                   marks={i: str(i) for i in range(1, 11)}),
         
         html.Label("Parámetro (a = M/m):", style={'marginTop': '20px'}),
         dcc.Slider(id='a-slider', min=0.1, max=10.0, step=0.1, value=1.0,
