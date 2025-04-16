@@ -4,47 +4,21 @@ from dash.dependencies import Input, Output
 import numpy as np
 import plotly.graph_objs as go
 import os
-import base64
-from plotly.subplots import make_subplots
-
-# Carga la imagen y la codifica en base64
-image_path = 'pendulo.png'
-encoded_image = base64.b64encode(open(image_path, 'rb').read()).decode()
+import plotly.express as px
 
 app = dash.Dash(__name__)
 app.title = "Péndulo invertido móvil"
 
 g = 9.81
 
-# Layout con sliders, imagen y contenedor para las gráficas
+# Layout con sliders, contenedor para las gráficas y la animación
 app.layout = html.Div([
     html.H1("Péndulo invertido móvil", style={'textAlign': 'center'}),
 
     html.Div([
-        html.Img(
-            src='data:image/png;base64,{}'.format(encoded_image),
-            style={
-                'width': '20%',
-                'margin': '20px auto 10px auto',
-                'display': 'block',
-                'borderRadius': '12px',
-                'boxShadow': '0 4px 8px rgba(0,0,0,0.2)',
-                'border': '1px solid #ccc',
-                'backgroundColor': '#fff',
-                'padding': '10px'
-            }
-        ),
-        html.P("Esquema del sistema físico", style={
-            'textAlign': 'center',
-            'fontStyle': 'italic',
-            'color': '#444'
-        })
-    ]),
-
-    html.Div([
         html.Label("Longitud (l) [m]:"),
-        dcc.Slider(id='l-slider', min=0.1, max=10.0, step=0.1, value=1.0,
-                   marks={i: str(i) for i in range(1, 11)}),
+        dcc.Slider(id='l-slider', min=0.1, max=8.0, step=0.1, value=1.0,
+                   marks={i: str(i) for i in range(1, 9)}),
         
         html.Label("Parámetro (a = M/m):", style={'marginTop': '20px'}),
         dcc.Slider(id='a-slider', min=0.1, max=10.0, step=0.1, value=1.0,
@@ -52,11 +26,19 @@ app.layout = html.Div([
     ], style={'width': '80%', 'margin': 'auto'}),
 
     html.Div(id='error-output', style={'textAlign': 'center', 'marginTop': '20px'}),
-    dcc.Graph(id='multi-plot')
+    
+    # Gráficas
+    dcc.Graph(id='multi-plot'),
+
+    # Animación del carrito y pesas
+    html.Div([
+        dcc.Graph(id='pendulum-animation', config={'staticPlot': False}),
+    ], style={'width': '80%', 'margin': 'auto', 'height': '400px'})
 ])
 
 @app.callback(
     [Output('multi-plot', 'figure'),
+     Output('pendulum-animation', 'figure'),
      Output('error-output', 'children')],
     [Input('l-slider', 'value'),
      Input('a-slider', 'value')]
@@ -105,30 +87,57 @@ def update_graph(l, a):
     x_cart_time = (2*l/(2+a)) * np.sin(theta_sampled)
     v_cart_time = (np.cos(theta_sampled)/(2+a)) * np.sqrt((8*g*l*(1-np.cos(theta_sampled)))/(1 - (2*np.cos(theta_sampled)**2)/(2+a)))
 
-    x_cart = (2*l/(2+a)) * np.sin(theta_full)
-    omega = np.sqrt((2*g*(1-np.cos(theta_full)))/(l*(1 - (2*np.cos(theta_full)**2)/(2+a))))
-    v_cart = (np.cos(theta_full)/(2+a)) * np.sqrt((8*g*l*(1-np.cos(theta_full)))/(1 - (2*np.cos(theta_full)**2)/(2+a)))
+    # Crear la animación del péndulo
+    frames = []
+    for t in range(len(cumulative_time)):
+        theta = theta_sampled[t]
+        x_cart = (2*l/(2+a)) * np.sin(theta)
+        y_pendulum = l * np.cos(theta)
 
-    # Crear subplots combinados
-    fig = make_subplots(rows=5, cols=1, shared_xaxes=False, vertical_spacing=0.08,
-                        subplot_titles=[
-                            "Posición del Carro vs Tiempo",
-                            "Velocidad Angular vs Ángulo",
-                            "Velocidad Angular vs Tiempo",
-                            "Velocidad del Carro vs Ángulo",
-                            "Velocidad del Carro vs Tiempo"
-                        ])
+        frames.append(go.Frame(
+            data=[
+                go.Scatter(
+                    x=[x_cart, x_cart], y=[0, y_pendulum], mode='lines', line=dict(color='blue', width=2),
+                ),
+                go.Scatter(
+                    x=[x_cart], y=[y_pendulum], mode='markers', marker=dict(size=12, color='red'),
+                )
+            ],
+            name=str(t)
+        ))
 
-    fig.add_trace(go.Scatter(x=cumulative_time, y=x_cart_time, name="x vs t"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=np.degrees(theta_full), y=omega, name="ω vs θ"), row=2, col=1)
-    fig.add_trace(go.Scatter(x=cumulative_time, y=omega_time[::2], name="ω vs t"), row=3, col=1)
-    fig.add_trace(go.Scatter(x=np.degrees(theta_full), y=v_cart, name="v vs θ"), row=4, col=1)
-    fig.add_trace(go.Scatter(x=cumulative_time, y=v_cart_time, name="v vs t"), row=5, col=1)
+    fig_animation = go.Figure(
+        data=[go.Scatter(x=[0], y=[0], mode='markers+lines')],
+        layout=go.Layout(
+            xaxis=dict(range=[-l, l], autorange=False),
+            yaxis=dict(range=[-l, l], autorange=False),
+            showlegend=False,
+            updatemenus=[dict(type='buttons', showactive=False, buttons=[dict(label='Play', method='animate', args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True)])])]
+        ),
+        frames=frames
+    )
 
-    fig.update_layout(height=1600, showlegend=False, template="plotly_white")
+    # Actualizar las gráficas de datos
+    fig_data = make_subplots(rows=5, cols=1, shared_xaxes=False, vertical_spacing=0.08,
+                             subplot_titles=[
+                                 "Posición del Carro vs Tiempo",
+                                 "Velocidad Angular vs Ángulo",
+                                 "Velocidad Angular vs Tiempo",
+                                 "Velocidad del Carro vs Ángulo",
+                                 "Velocidad del Carro vs Tiempo"
+                             ])
 
-    return fig, f"Error estimado: {E_t:.2e}"
+    fig_data.add_trace(go.Scatter(x=cumulative_time, y=x_cart_time, name="x vs t"), row=1, col=1)
+    fig_data.add_trace(go.Scatter(x=np.degrees(theta_full), y=omega_time[::2], name="ω vs θ"), row=2, col=1)
+    fig_data.add_trace(go.Scatter(x=cumulative_time, y=omega_time[::2], name="ω vs t"), row=3, col=1)
+    fig_data.add_trace(go.Scatter(x=np.degrees(theta_full), y=v_cart_time, name="v vs θ"), row=4, col=1)
+    fig_data.add_trace(go.Scatter(x=cumulative_time, y=v_cart_time, name="v vs t"), row=5, col=1)
+
+    fig_data.update_layout(height=1600, showlegend=False, template="plotly_white")
+
+    return fig_data, fig_animation, f"Error estimado por Simpson: {E_t:.2e}"
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8050))
+    port = int(os.environ.get('PORT', 8050))  # usa el puerto que Render indique
     app.run(host='0.0.0.0', port=port, debug=False)
+
