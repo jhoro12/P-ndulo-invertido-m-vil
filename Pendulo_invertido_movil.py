@@ -1,149 +1,90 @@
-import os
-import base64
-
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
-
 import numpy as np
-import plotly.graph_objs as go
-from plotly.subplots import make_subplots
+import json
 
-# --- Carga de imagen ---
-IMAGE_PATH = 'pendulo.png'
-with open(IMAGE_PATH, 'rb') as f:
-    encoded_image = base64.b64encode(f.read()).decode()
-
+# Inicialización de la app
 app = dash.Dash(__name__)
 app.title = "Péndulo invertido móvil"
 
-g = 9.81
+g = 9.81  # Aceleración debido a la gravedad
+l = 1.0  # Longitud del péndulo
+a = 1.0  # Parámetro (M/m)
+theta_time = np.linspace(0, 2 * np.pi, 200)
 
-# --- LAYOUT ---
+# Trayectorias para la animación
+x_cart_time = (2 * l / (2 + a)) * np.sin(theta_time)
+y_pend_time = -l * np.cos(theta_time)
+
+# Guardamos las posiciones en un diccionario para pasarlas al cliente
+traj = {
+    'x': x_cart_time.tolist(),
+    'y': y_pend_time.tolist(),
+    'theta': theta_time.tolist()
+}
+
+# Layout de la app
 app.layout = html.Div([
     html.H1("Péndulo invertido móvil", style={'textAlign': 'center'}),
 
-    # Imagen
-    html.Img(
-        src=f"data:image/png;base64,{encoded_image}",
-        style={'width': '30%', 'display': 'block', 'margin': '20px auto'}
-    ),
+    # Canvas para la animación
+    html.Canvas(id='my-canvas', width=600, height=400, style={'border': '1px solid black'}),
 
-    # Sliders
-    html.Div([
-        html.Label("Longitud (l) [m]:"),
-        dcc.Slider(id='l-slider', min=0.1, max=8.0, step=0.1, value=1.0,
-                   marks={i: str(i) for i in range(1, 9)}),
+    # Intervalo para animar
+    dcc.Interval(id='interval', interval=50, n_intervals=0),
 
-        html.Label("Parámetro (a = M/m):", style={'marginTop': '20px'}),
-        dcc.Slider(id='a-slider', min=0.1, max=10.0, step=0.1, value=1.0,
-                   marks={i: str(i) for i in range(1, 11)}),
-    ], style={'width': '80%', 'margin': 'auto'}),
-
-    # Mensaje de error
-    html.Div(id='error-output', style={'textAlign': 'center', 'marginTop': '20px'}),
-
-    # Gráficas de datos
-    dcc.Graph(id='multi-plot'),
-
-    # Animación del péndulo
-    dcc.Graph(id='pendulum-animation', style={'height': '400px'})
+    # Almacenamos las trayectorias
+    dcc.Store(id='traj-data', data=traj)
 ])
 
+# Callback en JavaScript para dibujar en el canvas
+app.clientside_callback(
+    """
+    function(n, traj) {
+        const canvas = document.getElementById('my-canvas');
+        const ctx = canvas.getContext('2d');
+        const N = traj.x.length;
+        const i = n % N;  // índice cíclico para animación
 
-# --- CALLBACK ---
-@app.callback(
-    [Output('multi-plot', 'figure'),
-     Output('pendulum-animation', 'figure'),
-     Output('error-output', 'children')],
-    [Input('l-slider', 'value'),
-     Input('a-slider', 'value')]
+        // Mapeamos las posiciones de las trayectorias
+        const cx = 300 + 100 * traj.x[i];  // Ajuste de escala para la posición x del carrito
+        const cy = 200;  // El carrito se mueve en una línea horizontal en y = 200
+        const theta = traj.theta[i];
+
+        // Calculamos la posición de la pesa en base al ángulo
+        const x_pend = cx + 100 * Math.sin(theta);  // Posición circular de la pesa
+        const y_pend = cy - 100 * Math.cos(theta);  // Posición circular de la pesa
+
+        // Limpia el canvas en cada frame
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Dibuja el carrito como un rectángulo
+        ctx.fillStyle = 'blue';
+        ctx.fillRect(cx - 20, cy - 10, 40, 20);  // Carrito moviéndose a lo largo de la línea
+
+        // Dibuja la línea del péndulo
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(x_pend, y_pend);
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Dibuja la pesa como un círculo rojo
+        ctx.beginPath();
+        ctx.arc(x_pend, y_pend, 10, 0, 2*Math.PI);
+        ctx.fillStyle = 'red';
+        ctx.fill();
+
+        return '';
+    }
+    """,
+    Output('traj-data', 'modified_timestamp'),  # Un dummy output, ya que no necesitamos un cambio visible
+    Input('interval', 'n_intervals'),
+    Input('traj-data', 'data')
 )
-def update_all(l, a):
-    # Cálculos comunes
-    h = 0.01
-    theta_full = np.linspace(0, 2*np.pi, 1000)
-    theta_time = np.arange(0.1, 2*np.pi - 0.00001, h)
-    if len(theta_time) % 2 == 0:
-        theta_time = theta_time[:-1]
-    omega_time = np.sqrt((2*g*(1-np.cos(theta_time))) /
-                         (l*(1 - (2*np.cos(theta_time)**2)/(2+a))))
-    integrand = 1/omega_time
-    n_chunks = (len(theta_time) - 1) // 2
-    intervals = []
-    for i in range(n_chunks):
-        n0 = 2*i
-        intervals.append((h/3)*(integrand[n0] + 4*integrand[n0+1] + integrand[n0+2]))
-    cumulative_time = np.cumsum(np.insert(intervals, 0, 0))
-    theta_sampled = theta_time[::2]
 
-    # Error de Simpson
-    theta_c = (theta_time[0] + theta_time[-1]) / 2
-    def f_inv(t): return 1/np.sqrt((2*g*(1-np.cos(t))) /
-                                     (l*(1 - (2*np.cos(t)**2)/(2+a))))
-    def fourth(f, t, h):
-        return (f(t-2*h) - 4*f(t-h) + 6*f(t) - 4*f(t+h) + f(t+2*h)) / h**4
-    E_t = -((theta_time[-1]-theta_time[0]) * h**4 / 180) * fourth(f_inv, theta_c, h)
-
-    # Datos para gráficas
-    x_t = (2*l/(2+a))*np.sin(theta_sampled)
-    v_t = (np.cos(theta_sampled)/(2+a))* \
-        np.sqrt((8*g*l*(1-np.cos(theta_sampled))) /
-                (1 - (2*np.cos(theta_sampled)**2)/(2+a)))
-    omega_full = np.sqrt((2*g*(1-np.cos(theta_full))) /
-                         (l*(1 - (2*np.cos(theta_full)**2)/(2+a))))
-    v_full = (np.cos(theta_full)/(2+a))* \
-        np.sqrt((8*g*l*(1-np.cos(theta_full))) /
-                (1 - (2*np.cos(theta_full)**2)/(2+a)))
-
-    # --- Figura de datos ---
-    fig_data = make_subplots(rows=5, cols=1, vertical_spacing=0.08,
-                             subplot_titles=[
-                                 "x(t)", "ω(θ)", "ω(t)", "v(θ)", "v(t)"
-                             ])
-    fig_data.add_trace(go.Scatter(x=cumulative_time, y=x_t), row=1, col=1)
-    fig_data.add_trace(go.Scatter(x=np.degrees(theta_full), y=omega_full), row=2, col=1)
-    fig_data.add_trace(go.Scatter(x=cumulative_time, y=omega_time[::2]), row=3, col=1)
-    fig_data.add_trace(go.Scatter(x=np.degrees(theta_full), y=v_full), row=4, col=1)
-    fig_data.add_trace(go.Scatter(x=cumulative_time, y=v_t), row=5, col=1)
-    fig_data.update_layout(height=1600, showlegend=False, template='plotly_white')
-
-    # --- Animación del péndulo ---
-    frames = []
-    for i, th in enumerate(theta_sampled):
-        x_cart = (2*l/(2+a))*np.sin(th)
-        y_p = -l*np.cos(th)
-        frames.append(go.Frame(
-            data=[
-                # Carrito como línea horizontal (o podrías usar un rectángulo)
-                go.Scatter(x=[x_cart-0.2, x_cart+0.2], y=[0, 0], mode='lines', line=dict(width=10, color='black')),
-                # Masa como círculo rojo
-                go.Scatter(x=[x_cart], y=[y_p], mode='markers', marker=dict(size=12, color='red'))
-            ],
-            name=str(i)
-        ))
-
-    fig_anim = go.Figure(
-        data=frames[0].data,
-        frames=frames,
-        layout=go.Layout(
-            xaxis=dict(range=[-l-1, l+1], autorange=False),
-            yaxis=dict(range=[-l-1, 1], autorange=False),
-            showlegend=False,
-            updatemenus=[dict(
-                type='buttons',
-                buttons=[dict(label='▶︎ Play',
-                              method='animate',
-                              args=[None, {"frame": {"duration": 50, "redraw": True},
-                                           "fromcurrent": True}])]
-            )]
-        )
-    )
-
-    return fig_data, fig_anim, f"Error estimado: {E_t:.2e}"
-
-# --- RUN SERVER ---
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8050))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True)
 
