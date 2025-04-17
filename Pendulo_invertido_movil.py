@@ -13,7 +13,7 @@ image_path = 'pendulo.png'
 encoded_image = base64.b64encode(open(image_path, 'rb').read()).decode()
 
 # Inicializar app con Bootstrap
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Péndulo invertido móvil"
 
 g = 9.81
@@ -27,7 +27,7 @@ app.layout = dbc.Container([
         dbc.Col(html.Img(
             src='data:image/png;base64,{}'.format(encoded_image),
             style={
-                'width': '60%',
+                'width': '40%',
                 'margin': '0 auto',
                 'display': 'block',
                 'borderRadius': '12px',
