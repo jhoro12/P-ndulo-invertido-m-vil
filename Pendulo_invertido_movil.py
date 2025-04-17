@@ -24,7 +24,7 @@ app.layout = html.Div([
         html.Img(
             src='data:image/png;base64,{}'.format(encoded_image),
             style={
-                'width': '20%',
+                'width': '35%',
                 'margin': '20px auto 10px auto',
                 'display': 'block',
                 'borderRadius': '12px',
